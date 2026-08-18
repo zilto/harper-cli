@@ -1,7 +1,35 @@
-This repository publishes built binaries for the `harper-cli` tool authored by the project
-`Automattic/harper` on GitHub.
-link: https://github.com/Automattic/harper/
+harper-cli (PyPI package)
+-------------------------
 
-The current project builds this binary for multiple platforms and bundles with the original LICENSE file (Apache 2.0).
+This repository packages and publishes wheels containing pre-built binaries
+of `harper-cli`, authored, maintained, and built by the `Automattic/harper`
+project:
 
-The current project is not affiliatedwith `Automattic/harper` and is not an official mirror or fork.
+    https://github.com/Automattic/harper/
+
+The bundled `harper-cli` binary is unmodified Object-form output of that
+project's source code. It is licensed under the Apache License, Version 2.0.
+A verbatim copy of that license, including the upstream copyright notice
+("Copyright 2024 Elijah Potter"), is included in the `LICENSE` file of this
+repository, as required by Section 4 of the Apache License.
+
+As of this writing, `Automattic/harper` does not distribute a NOTICE file at
+the root of its repository, so there are no additional upstream attribution
+notices to reproduce beyond the copyright line in `LICENSE`.
+
+This project is not affiliated with, endorsed by, or an official mirror of
+`Automattic/harper`. All credit for the design, implementation, and features
+of `harper-cli` belongs to the Automattic/harper team and contributors. The
+sole contribution of this repository is packaging: fetching/building the
+binary for each supported platform and wrapping it as an installable Python
+wheel, distributed via PyPI, which Automattic has not published themselves.
+
+Packaging code license
+-----------------------
+
+The packaging code in this repository (everything outside of the bundled
+`harper-cli` binary itself, e.g. `src/harper/`, `scripts/`) is original work
+by Thierry Jean, Copyright 2026, and is separately licensed under the Apache
+License, Version 2.0 (see `LICENSE`). This copyright/license notice covers
+only the packaging code, and is distinct from the upstream `harper-cli`
+binary's copyright described above.
