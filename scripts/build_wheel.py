@@ -98,6 +98,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Automattic/harper release tag to package, e.g. v2.8.0",
     )
     parser.add_argument(
+        "--package-version",
+        default=None,
+        help=(
+            "Version to stamp into pyproject.toml / publish to PyPI, overriding the "
+            "default of using --version as-is (leading 'v' stripped). Useful to "
+            "republish the same upstream release under a new version (e.g. "
+            "2.8.0.post1) when PyPI permanently blocks reusing a deleted version."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("dist"),
@@ -175,6 +185,10 @@ def extract_binary(archive_path: Path, extract_dir: Path) -> Path:
 @contextlib.contextmanager
 def stamped_pyproject_version(version: str) -> Generator[None]:
     """Temporarily rewrite `pyproject.toml`'s version, restoring it afterward.
+
+    `version` is the package version to publish (a leading `v`, if present, is
+    stripped, but it need not match the upstream `Automattic/harper` tag --
+    e.g. it may be a `--package-version` override like `2.8.0.post1`).
 
     Always restores the original file, even if the build fails, so the real
     checkout never ends up with a stale bumped version.
@@ -263,6 +277,7 @@ def build_wheel(binary_path: Path, wheel_tags: list[str], output_dir: Path, vers
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    package_version = args.package_version or args.version
 
     assets = list_release_assets(args.version)
     resolved = resolve_wheel_targets(assets)
@@ -277,7 +292,7 @@ def main(argv: list[str] | None = None) -> None:
             extract_dir = tmp_path / "extracted"
             extract_dir.mkdir()
             binary_path = extract_binary(archive_path, extract_dir)
-            build_wheel(binary_path, wheel_tags, args.output_dir, args.version)
+            build_wheel(binary_path, wheel_tags, args.output_dir, package_version)
 
 
 if __name__ == "__main__":
