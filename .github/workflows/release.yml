@@ -1,0 +1,112 @@
+name: Release
+
+
+# The workflow runs daily to check whether `Automattic/harper` has a
+# newer release than what's currently published on PyPI, and publishes
+# it automatically if so. `workflow_dispatch` remains available to
+# trigger the same discovery logic on demand (e.g. to release
+# immediately instead of waiting for the next scheduled run); there's
+# no manual version input, the version is always discovered from
+# `Automattic/harper`'s latest release compared against PyPI.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Check for the latest releases of `harper-cli` on GitHub and PyPI.
+  check-releases:
+    runs-on: ubuntu-latest
+    if: github.repository == 'zilto/harper-cli'
+    outputs:
+      latest_github_version: ${{ steps.github.outputs.version }}
+      latest_pypi_version: ${{ steps.pypi.outputs.version }}
+    steps:
+      - name: Check latest release of `Automattic/harper` on GitHub
+        id: github
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          latest_tag=$(gh api repos/Automattic/harper/releases/latest --jq .tag_name)
+          echo "latest Automattic/harper release: $latest_tag"
+
+          if ! printf '%s' "$latest_tag" | \
+            grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
+            echo "unexpected tag format from Automattic/harper: '$latest_tag' (expected e.g. v2.8.0)" >&2
+            exit 1
+          fi
+
+          echo "version=${latest_tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check latest release of `harper-cli` on PyPI
+        id: pypi
+        run: |
+          set -euo pipefail
+
+          # Cold start: if `harper-cli` has never been published, PyPI's
+          # JSON API returns 404. Report an empty version in that case
+          # (rather than failing), which will simply never match a real
+          # `Automattic/harper` version, so day-1 runs still publish.
+          http_status=$(curl -s -o /tmp/pypi.json -w '%{http_code}' https://pypi.org/pypi/harper-cli/json)
+
+          if [ "$http_status" = "404" ]; then
+            echo "harper-cli is not yet published on PyPI (cold start)"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          elif [ "$http_status" = "200" ]; then
+            version=$(jq -r '.info.version' /tmp/pypi.json)
+            echo "latest PyPI harper-cli version: $version"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "unexpected PyPI response: HTTP $http_status" >&2
+            exit 1
+          fi
+
+  # Package and publish one wheel per platform.
+  # This reuses binaries built by `Automattic/harper`
+  release:
+    needs: check-releases
+    if: >-
+      github.repository == 'zilto/harper-cli' &&
+      needs.check-releases.outputs.latest_github_version != needs.check-releases.outputs.latest_pypi_version
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: v${{ needs.check-releases.outputs.latest_github_version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install `uv`
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Build wheels for all platforms
+        env:
+          # the GitHub token provides better rate limits for the Python script.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          uv run --no-project scripts/build_wheel.py \
+            --version "${{ env.VERSION }}" \
+            --output-dir dist
+          ls -la dist/
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish
+
+      - name: Install from pypi
+        # install `harper-cli` from pypi; step fails if cannot run `harper` command.
+        # from official uv docs:  https://docs.astral.sh/uv/guides/package/#installing-your-package
+        run: uv run --with harper-cli --no-project -- harper core-version
