@@ -1,0 +1,27 @@
+[project]
+name = "harper-cli"
+version = "0.1.0"
+description = "Wrap the `harper-cli` binary from `Automattic/harper` into a Python package distributable via `pypi`."
+readme = "README.md"
+license = { file = "LICENSE"}
+authors = [
+    { name = "zilto", email = "68975210+zilto@users.noreply.github.com" }
+]
+requires-python = ">=3.10"
+dependencies = []
+urls = {
+    Documentation = "https://github.com/zilto/harper-cli#README",
+    Source = "https://github.com/zilto/harper-cli",
+    Issues = "https://github.com/zilto/harper-cli"
+}
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mdsmith>=0.54.0",
+    "prek>=0.4.14",
+    "ruff>=0.16.3",
+]
