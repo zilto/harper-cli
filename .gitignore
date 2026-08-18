@@ -1,0 +1,6 @@
+.venv
+.zed/
+**/__pycache__
+dist/
+**.whl
+src/harper/_bin/
