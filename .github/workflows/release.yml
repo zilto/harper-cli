@@ -5,28 +5,58 @@ name: Release
 # newer release than what's currently published on PyPI, and publishes
 # it automatically if so. `workflow_dispatch` remains available to
 # trigger the same discovery logic on demand (e.g. to release
-# immediately instead of waiting for the next scheduled run); there's
-# no manual version input, the version is always discovered from
-# `Automattic/harper`'s latest release compared against PyPI.
+# immediately instead of waiting for the next scheduled run).
+#
+# `workflow_dispatch` also accepts two optional manual overrides:
+#   - `github_version`: build from this `Automattic/harper` tag instead of
+#     auto-discovering the latest one (e.g. to re-run a specific version).
+#   - `package_version`: publish under this version instead of
+#     `github_version` as-is. Useful when a version was already uploaded to
+#     PyPI and then deleted -- PyPI never allows reusing a deleted version,
+#     so the same release has to be republished under a new version, e.g. a
+#     PEP 440 post-release like `2.8.0.post1`.
+# Providing either input forces a release even if it matches what's already
+# on PyPI, bypassing the daily comparison.
 on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      github_version:
+        description: >-
+          Automattic/harper release tag to build from (e.g. v2.7.0). Leave
+          empty to auto-discover the latest Automattic/harper release, same
+          as the scheduled run.
+        required: false
+        type: string
+      package_version:
+        description: >-
+          Version to publish to PyPI (e.g. 2.8.0.post1), overriding the
+          default of using `github_version` as-is (leading `v` stripped).
+          Useful to republish a release under a new version after a
+          previous PyPI upload of that version was deleted. Leave empty to
+          use `github_version` unchanged.
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  # Check for the latest releases of `harper-cli` on GitHub and PyPI.
+  # Check for the latest releases of `harper-cli` on GitHub and PyPI, and
+  # resolve them (together with any manual `workflow_dispatch` overrides)
+  # into the actual tag/version to build and whether to release at all.
   check-releases:
     runs-on: ubuntu-latest
     if: github.repository == 'zilto/harper-cli'
     outputs:
-      latest_github_version: ${{ steps.github.outputs.version }}
-      latest_pypi_version: ${{ steps.pypi.outputs.version }}
+      github_tag: ${{ steps.resolve.outputs.github_tag }}
+      package_version: ${{ steps.resolve.outputs.package_version }}
+      should_release: ${{ steps.resolve.outputs.should_release }}
     steps:
       - name: Check latest release of `Automattic/harper` on GitHub
         id: github
+        if: ${{ github.event.inputs.github_version == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -35,13 +65,7 @@ jobs:
           latest_tag=$(gh api repos/Automattic/harper/releases/latest --jq .tag_name)
           echo "latest Automattic/harper release: $latest_tag"
 
-          if ! printf '%s' "$latest_tag" | \
-            grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
-            echo "unexpected tag format from Automattic/harper: '$latest_tag' (expected e.g. v2.8.0)" >&2
-            exit 1
-          fi
-
-          echo "version=${latest_tag#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$latest_tag" >> "$GITHUB_OUTPUT"
 
       - name: Check latest release of `harper-cli` on PyPI
         id: pypi
@@ -66,20 +90,70 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve the tag to build and the version to publish
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          input_github_version="${{ github.event.inputs.github_version }}"
+          input_package_version="${{ github.event.inputs.package_version }}"
+          discovered_tag="${{ steps.github.outputs.tag }}"
+          pypi_version="${{ steps.pypi.outputs.version }}"
+
+          if [ -n "$input_github_version" ]; then
+            manual=true
+            github_tag="$input_github_version"
+            case "$github_tag" in
+              v*) ;;
+              *) github_tag="v$github_tag" ;;
+            esac
+          else
+            manual=false
+            github_tag="$discovered_tag"
+          fi
+
+          if ! printf '%s' "$github_tag" | \
+            grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
+            echo "unexpected version format: '$github_tag' (expected e.g. v2.8.0)" >&2
+            exit 1
+          fi
+
+          if [ -n "$input_package_version" ]; then
+            manual=true
+            package_version="$input_package_version"
+          else
+            package_version="${github_tag#v}"
+          fi
+
+          if [ "$manual" = true ]; then
+            should_release=true
+          elif [ "$package_version" != "$pypi_version" ]; then
+            should_release=true
+          else
+            should_release=false
+          fi
+
+          echo "resolved github_tag=$github_tag package_version=$package_version should_release=$should_release"
+
+          echo "github_tag=$github_tag" >> "$GITHUB_OUTPUT"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
+
   # Package and publish one wheel per platform.
   # This reuses binaries built by `Automattic/harper`
   release:
     needs: check-releases
     if: >-
       github.repository == 'zilto/harper-cli' &&
-      needs.check-releases.outputs.latest_github_version != needs.check-releases.outputs.latest_pypi_version
+      needs.check-releases.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: read
       id-token: write
     env:
-      VERSION: v${{ needs.check-releases.outputs.latest_github_version }}
+      GITHUB_VERSION: ${{ needs.check-releases.outputs.github_tag }}
+      PACKAGE_VERSION: ${{ needs.check-releases.outputs.package_version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -97,7 +171,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           uv run --no-project scripts/build_wheel.py \
-            --version "${{ env.VERSION }}" \
+            --version "${{ env.GITHUB_VERSION }}" \
+            --package-version "${{ env.PACKAGE_VERSION }}" \
             --output-dir dist
           ls -la dist/
 
