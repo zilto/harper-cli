@@ -1,0 +1,7 @@
+This repository publishes built binaries for the `harper-cli` tool authored by the project
+`Automattic/harper` on GitHub.
+link: https://github.com/Automattic/harper/
+
+The current project builds this binary for multiple platforms and bundles with the original LICENSE file (Apache 2.0).
+
+The current project is not affiliatedwith `Automattic/harper` and is not an official mirror or fork.
